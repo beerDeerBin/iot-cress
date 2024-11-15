@@ -27,6 +27,7 @@
 #include "c_types.h"
 #include <string>
 #include "spiffs/spiffs_config.h"
+#include <BH1750.h>
 
 /****************************************************************
 * Module: Genral
@@ -45,7 +46,7 @@
 
 #define BUTTON_WATERING_PIN D7                  // pin of the watering button
 #define BUTTON_SYSTEM_PIN D4                    // pin of the system button
-#define BUTTON_SHORT_PRESS_IDLE_TIME 50000      // short button pressed idle time [us]
+#define BUTTON_SHORT_PRESS_IDLE_TIME 100000     // short button pressed idle time [us]
 #define BUTTON_LONG_PRESS_IDLE_TIME 5000000     // long button pressed idle time [us]
 
 // Working varibales for the System
@@ -57,8 +58,6 @@ typedef struct WorkVarSystem_S {
   uint32_t    measurementSlot;                  // current measurment slot 0 <= measurementSlot <= NUM_OF_SAMPLES_PER_MSG
   uint32_t    wateringBtnCnt;                   // watering button counter stored in the system
   uint32_t    systemBtnCnt;                     // system button counter stored in the system
-  uint32_t*   pWateringBtnCnt;                  // pointer that points to the wateringBtnCnt from the ISR
-  uint32_t*   pSystemBtnCnt;                    // pointer that points to the systemBtnCnt from the ISR
   uint64_t    maxRuntime;                       // maximum runtime of the background loop [ms]
 } WorkVarSystem_T;
 
@@ -193,6 +192,7 @@ const char* MQTT_TOPIC_PUBLISH_WATERING = "sensor/6/sandbox/urgent";
 
 // JSON KEYS
 const char* MQTT_JSON_KEY_VERSION = "Version";
+const char* MQTT_JSON_KEY_TIME = "Milliseconds";
 const char* MQTT_JSON_KEY_SOIL_MOISTURE = "SoilMoisture";
 const char* MQTT_JSON_KEY_SOIL_TEMPERATURE = "SoilTemperature";
 const char* MQTT_JSON_KEY_AIR_MOISTURE = "AirMoisture";
@@ -239,8 +239,8 @@ typedef struct WorkVarSMS_S {
 * Module: Air Temperature/Humidity Sensor
 ****************************************************************/
 
-#define ATS_SDA_BUS_PIN  D1                     // SDA pin of the Air Temperature/Humidity Sensor I2C bus
-#define ATS_SCL_BUS_PIN  D2                     // SCL pin of the Air Temperature/Humidity Sensor I2C bus
+#define ATS_SDA_BUS_PIN  D2                     // SDA pin of the Air Temperature/Humidity Sensor I2C bus
+#define ATS_SCL_BUS_PIN  D1                     // SCL pin of the Air Temperature/Humidity Sensor I2C bus
 
 // Working varibales for the Air Temperature/Humidity Sensor module
 typedef struct WorkVarATS_S {
@@ -249,6 +249,19 @@ typedef struct WorkVarATS_S {
   float       tempValues[NUM_OF_SAMPLES_PER_MSG];   // buffer for the Air Temperature/Humidity Sensor temperature values for one message
   float       humidValues[NUM_OF_SAMPLES_PER_MSG];   // buffer for the Air Temperature/Humidity Sensor temperature values for one message
 } WorkVarATS_T;
+
+/****************************************************************
+* Module: Light Sensor
+****************************************************************/
+
+#define LS_SDA_BUS_PIN  D2                      // SDA pin of the Light Sensor I2C bus
+#define LS_SCL_BUS_PIN  D1                      // SCL pin of the Light Sensor I2C bus
+
+// Working varibales for the Light Sensor module
+typedef struct WorkVarLS_S {
+  float       lastValue;                        // last recorded Light value from the Light Sensor Sensor
+  float       values[NUM_OF_SAMPLES_PER_MSG];   // buffer for the Light Sensor values for one message
+} WorkVarLS_T;
 
 #endif // _CONFIGURATIONS_H
 
