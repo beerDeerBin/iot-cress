@@ -44,10 +44,11 @@
 #define ENVIROMENT_MSG_FREQUNCY 600             // enviroment message frequncy [s] i.e every ENVIROMENT_MSG_FREQUNCY a new enviroment message is sent
 #define NUM_OF_SAMPLES_PER_MSG 30               // number of samples mesaured per enviroment message i.e ENVIROMENT_MSG_FREQUNCY/value = sample rate [s]
 
+#define ISR_1KHZ_TIME 1                         // 1kHz interrupt length [ms]
 #define BUTTON_WATERING_PIN D7                  // pin of the watering button
 #define BUTTON_SYSTEM_PIN D4                    // pin of the system button
-#define BUTTON_SHORT_PRESS_IDLE_TIME 100000     // short button pressed idle time [us]
-#define BUTTON_LONG_PRESS_IDLE_TIME 5000000     // long button pressed idle time [us]
+#define BUTTON_SHORT_PRESS_IDLE_TIME 50         // short button pressed idle time [ms]
+#define BUTTON_LONG_PRESS_IDLE_TIME 5000        // long button pressed idle time [ms]
 
 // Working varibales for the System
 typedef struct WorkVarSystem_S {
@@ -61,23 +62,23 @@ typedef struct WorkVarSystem_S {
   uint64_t    maxRuntime;                       // maximum runtime of the background loop [ms]
 } WorkVarSystem_T;
 
-// Working varibales for the Watering Button
-typedef struct WorkVarWateringBtn_S {
-  uint32_t    wateringBtnCnt;                   // watering button counter
+// Working varibales for a Button
+typedef struct WorkVarBtn_S {
+  uint32_t    pin;                              // pin of the button
+  uint32_t    isPullup;                         // indicator if the button is connected via a pullup
+  uint32_t    btnCnt;                           // button counter
   uint32_t    isButtonPressed;                  // indicator if the button is currently pressed
-  uint64_t    idleTime;                         // idle time which the watering must be pressed to be proccessed
-  uint64_t    lastRisingEdge;                   // time when the watering button pressed [us] i.e rising edge
-  uint64_t    maxRuntime;                       // maximum runtime of the watering button ISR [us]
-} WorkVarWateringBtn_T;
+  uint32_t    buttonPressedCnt;                 // counter which counts in 1ms steps the length of the current button press
+  uint32_t    buttonPressedIdleTime;            // time which the button needs to keep a stable signal to register as a press [ms]
+} WorkVarBtn_T;
 
-// Working varibales for the System Button
-typedef struct WorkVarSystemBtn_S {
-  uint32_t    systemBtnCnt;                     // system button counter
-  uint32_t    isButtonPressed;                  // indicator if the button is currently pressed
-  uint64_t    idleTime;                         // idle time which the watering must be pressed to be proccessed
-  uint64_t    lastRisingEdge;                   // time when the system button pressed [us] i.e rising edge
-  uint64_t    maxRuntime;                       // maximum runtime of the watering button ISR [us]
-} WorkVarSystemBtn_T;
+// Working varibales for 1kHz ISR
+typedef struct WorkVar1kHzISR_S {
+  WorkVarBtn_T  workVarWateringBtn;             // working variables of the watering button
+  WorkVarBtn_T  workVarSystemBtn;               // working variables of the system button
+  uint64_t      msCounter;                      // millisecond counter
+  uint64_t      maxRuntime;                     // maximum runtime of the background loop [us]
+} WorkVar1kHzISR_T;
 
 /****************************************************************
 * Module: Serial
@@ -89,22 +90,20 @@ typedef struct WorkVarSystemBtn_S {
 * Module: System LED
 ****************************************************************/
 
-#define SYSTEM_LED_TIMER_ISR 10                 // system LED timer interrupt length [ms]
 #define SYSTEM_LED_PIN D0                       // pin number of the System LED
 #define SYSTEM_LED_OFF 1                        // the System LED is off
 #define SYSTEM_LED_ON 0                         // the System LED is on
-#define SYSTEM_LED_DELAY_STARTUP 10             // start up mode System led blink delay in 10ms steps
-#define SYSTEM_LED_DELAY_NORMAL 100             // normal mode System led blink delay in 10ms steps
-#define SYSTEM_LED_DELAY_CALIBRATION 25         // calibration mode System led blink delay in 10ms steps
+#define SYSTEM_LED_DELAY_STARTUP 100            // start up mode System led blink delay [ms]
+#define SYSTEM_LED_DELAY_NORMAL 1000            // normal mode System led blink delay [ms]
+#define SYSTEM_LED_DELAY_CALIBRATION 250        // calibration mode System led blink delay [ms]
 
 // Working varibales for the System LED module
 typedef struct WorkVarSystemLed_S {
   uint8_t     pin;                              // the pin of the System LED
   uint8_t     currentValue;                     // the current value of the System LED i.e off or on
   uint8_t     buffer[2];                        // buffer to keep the data 32-Bit alligned
-  uint32_t    delay;                            // current blink delay in 10ms steps
-  uint32_t    callCnt;                          // counter which counts the calls to the timer ISR
-  uint64_t    maxRuntime;                       // maximum runtime of the timer ISR [us]
+  uint32_t    delay;                            // current blink delay [ms]
+  uint32_t    callCnt;                          // call counter
 } WorkVarSystemLed_T;
 
 /****************************************************************
@@ -183,9 +182,9 @@ const char* MQTT_PASSWORD = "sensor6";
 const int MQTT_PORT = 8883;
 
 // MQTT topics
-const char* MQTT_TOPIC_SUBSCRIBED_FEEDBACK = "sensor/6/sandbox/feedback";
-const char* MQTT_TOPIC_PUBLISH_ENVIROMENT = "sensor/6/sandbox/environment";
-const char* MQTT_TOPIC_PUBLISH_WATERING = "sensor/6/sandbox/urgent";
+const char* MQTT_TOPIC_SUBSCRIBED_FEEDBACK = "sensor/6/test/feedback";
+const char* MQTT_TOPIC_PUBLISH_ENVIROMENT = "sensor/6/test/environment";
+const char* MQTT_TOPIC_PUBLISH_WATERING = "sensor/6/test/urgent";
 
 #define MQTT_MSG_BUFFER_SIZE 512                // size of the MQTT message buffer in byte
 #define MQTT_MSG_ENV_VERSION 1                  // current version of the MQTT enviroment message

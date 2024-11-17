@@ -9,11 +9,11 @@
 * Required External Libaries:
 *   - U8g2 [2.35.30]
 *   - PubSubClient [2.8.0]
-*   - ArduinoJson [7.2.0]
+*   - ArduinoJson [7.2.1]
 *   - ESP8266TimerInterrupt [1.6.0]
 *   - OneWire [2.3.8]
 *   - DallasTemperature [3.9.0]
-*   - Seeed_SHT35 [1.0.2]
+*   - Seeed_SHT35 [1.0.2], must be changed to comply with the ESP8266
 *   - BH1750 [1.3.0]
 *
 * Last Update: 13.11.2024
@@ -29,17 +29,15 @@
  ****************************************************************/
 
 // General
+ESP8266Timer                        ITimer;
 WorkVarSystem_T                     workVarSystem;
 WorkVarSystem_T*                    pWorkVarSystem;
-volatile WorkVarWateringBtn_T       workVarWateringBtn;
-volatile WorkVarWateringBtn_T*      pWorkVarWateringBtn;
-volatile WorkVarSystemBtn_T         workVarSystemBtn;
-volatile WorkVarSystemBtn_T*        pWorkVarSystemBtn;
+volatile WorkVar1kHzISR_T           workVar1kHzISR;
+volatile WorkVar1kHzISR_T*          pWorkVar1kHzISR;
 
 // System LED
-WorkVarSystemLed_T                  workVarSystemLed;
-WorkVarSystemLed_T*                 pWorkVarSystemLed;
-ESP8266Timer                        ITimer;
+volatile WorkVarSystemLed_T         workVarSystemLed;
+volatile WorkVarSystemLed_T*        pWorkVarSystemLed;
 
 // EEPROM
 EepromMirror_T                      eepromMirror;
@@ -82,19 +80,17 @@ WorkVarLS_T*                        pWorkVarLS;
 
 /**
  * @brief Blinks the System LED.
+ *
+ * @note Must be called form 1kHZ ISR.
  */
-void ICACHE_RAM_ATTR blinkSystemLedISR()
+void ICACHE_RAM_ATTR blinkSystemLedService()
 {
-  uint64_t startTime = micros();
-  uint64_t runTime;
-
   // Increment the call counter
   pWorkVarSystemLed->callCnt++;
 
   // Check if the System LED needs to be toggled
   if (pWorkVarSystemLed->callCnt == pWorkVarSystemLed->delay)
   {
-
     // Toggle the System LED value
     pWorkVarSystemLed->currentValue = !pWorkVarSystemLed->currentValue;
 
@@ -104,131 +100,81 @@ void ICACHE_RAM_ATTR blinkSystemLedISR()
     // Reset the call counter
     pWorkVarSystemLed->callCnt = 0;
   }
+}
 
-  // Calculate the ISR runtime
-  runTime = micros() - startTime;
+/**
+ * @brief Handles the one button.
+ *
+ * @param WorkVarBtn_T* pWorkVarBtn: Pointer that points to the Button working varibales.
+ *
+ * @note Must be called form 1kHZ ISR.
+ */
+void ICACHE_RAM_ATTR handleBtnService(volatile WorkVarBtn_T* pWorkVarBtn)
+{
+    // Read the current signal from the watering button
+  uint32_t signal = (uint32_t)digitalRead(pWorkVarBtn->pin);
 
-  // Check if the current runtime is greater than the max runtime
-  if (runTime > pWorkVarSystemLed->maxRuntime)
+  // Check if the a button press was registered
+  if ((signal == (uint32_t)HIGH && pWorkVarBtn->isPullup == (uint32_t)false) ||
+      (signal == (uint32_t)LOW  && pWorkVarBtn->isPullup == (uint32_t)true )  )
   {
+    // Check if the button was previosly released
+    if (pWorkVarBtn->isButtonPressed == (uint32_t)false)
+    {
+      // Update the button state
+      pWorkVarBtn->isButtonPressed = (uint32_t)true;
 
-    // Update the max runtime
-    pWorkVarSystemLed->maxRuntime = runTime;
+      // Reset the button press counter
+      pWorkVarBtn->buttonPressedCnt = 0;
+    } 
+    else
+    {
+      // Increment the button press counter
+      pWorkVarBtn->buttonPressedCnt++;
+
+      // Check if the button is pressed long enough
+      if (pWorkVarBtn->buttonPressedCnt == pWorkVarBtn->buttonPressedIdleTime)
+      {
+          // Register the current press a valid button press
+          pWorkVarBtn->btnCnt++;
+      }
+    } 
+  }
+  else
+  {
+    // Update the button state
+    pWorkVarBtn->isButtonPressed = (uint32_t)false;
   }
 }
 
 /**
- * @brief Handles the watering button.
+ * @brief 1kHz ISR Routine.
  */
-void ICACHE_RAM_ATTR handleWateringBtnISR()
+void ICACHE_RAM_ATTR isr1kHz()
 {
-  uint32_t signal = (uint32_t)digitalRead(BUTTON_WATERING_PIN);
   uint64_t startTime = micros();
-  uint64_t runTime, timeDiff;
+  uint64_t runTime;
 
-  // Check if the button was previosly released and the signal is high
-  if (pWorkVarWateringBtn->isButtonPressed == (uint32_t)false && signal == (uint32_t)HIGH)
-  {
-    // Update the button state
-    pWorkVarWateringBtn->isButtonPressed = (uint32_t)true;
+  // Increment the millisecond counter
+  pWorkVar1kHzISR->msCounter++;
 
-    // Update the last risisng edge time
-    pWorkVarWateringBtn->lastRisingEdge = startTime;
-  }
-  
-  // Check if the button was previosly prssed and the signal is low
-  if (pWorkVarWateringBtn->isButtonPressed == (uint32_t)true && signal == (uint32_t)LOW)
-  {
-    // Update the button state
-    pWorkVarWateringBtn->isButtonPressed = (uint32_t)false;
+  // Call the system led 1kHz service
+  blinkSystemLedService();
 
-    // Calculate the time difference, accounting for overflow
-    timeDiff = (startTime - pWorkVarWateringBtn->lastRisingEdge);
+  // Call the watering button service
+  handleBtnService(&pWorkVar1kHzISR->workVarWateringBtn);
 
-    // Check if the button press should be registered as a press
-    if (timeDiff > pWorkVarWateringBtn->idleTime)
-    {
-      // Increment the Watering button counter
-      pWorkVarWateringBtn->wateringBtnCnt++;
-
-      // Debug output
-      Serial.println("----WATERING BUTTON DEBUG-----");
-      Serial.print("Button released, time difference: ");
-      Serial.println(timeDiff);
-      Serial.print("Button released, start time: ");
-      Serial.println(startTime);
-      Serial.print("Button released, lastRisingEdge time: ");
-      Serial.println(pWorkVarWateringBtn->lastRisingEdge);
-    }
-  }
+  // Call the system button service
+  handleBtnService(&pWorkVar1kHzISR->workVarSystemBtn);
 
   // Calculate the ISR runtime
   runTime = micros() - startTime;
 
   // Check if the current runtime is greater than the max runtime
-  if (runTime > pWorkVarWateringBtn->maxRuntime)
+  if (runTime > pWorkVar1kHzISR->maxRuntime)
   {
     // Update the max runtime
-    pWorkVarWateringBtn->maxRuntime = runTime;
-  }
-}
-
-/**
- * @brief Handles the system button.
- */
-void ICACHE_RAM_ATTR handleSystemBtnISR()
-{
-  uint32_t signal = (uint32_t)digitalRead(BUTTON_SYSTEM_PIN);
-  uint64_t startTime = micros();
-  uint64_t runTime, timeDiff;
-
-  // Check if the button was previosly released and the signal is high
-  if (pWorkVarSystemBtn->isButtonPressed == (uint32_t)false && signal == (uint32_t)HIGH)
-  {
-    // Update the button state
-    pWorkVarSystemBtn->isButtonPressed = (uint32_t)true;
-
-    // Update the last risisng edge time
-    pWorkVarSystemBtn->lastRisingEdge = startTime;
-  }
-
-  // Check if the button was previosly pressed and the signal is low
-  if (pWorkVarSystemBtn->isButtonPressed == (uint32_t)true && signal == (uint32_t)LOW) 
-  {
-
-    // Update the button state
-    pWorkVarSystemBtn->isButtonPressed = (uint32_t)false;
-
-    // Calculate the time difference, accounting for overflow
-    timeDiff = (startTime - pWorkVarSystemBtn->lastRisingEdge);
-
-    // Check if the button press should be registered as a press
-    if (timeDiff > pWorkVarSystemBtn->idleTime)
-    {
-
-      // Increment the System button counter
-      pWorkVarSystemBtn->systemBtnCnt++;
-
-      // Debug output
-      Serial.println("----SYSTEM BUTTON DEBUG-----");
-      Serial.print("Button released, time difference: ");
-      Serial.println(timeDiff);
-      Serial.print("Button released, start time: ");
-      Serial.println(startTime);
-      Serial.print("Button released, lastRisingEdge time: ");
-      Serial.println(pWorkVarSystemBtn->lastRisingEdge);
-    }
-  }
-
-  // Calculate the ISR runtime
-  runTime = micros() - startTime;
-
-  // Check if the current runtime is greater than the max runtime
-  if (runTime > pWorkVarSystemBtn->maxRuntime)
-  {
-
-    // Update the max runtime
-    pWorkVarSystemBtn->maxRuntime = runTime;
+    pWorkVar1kHzISR->maxRuntime = runTime;
   }
 }
 
@@ -241,7 +187,6 @@ void ICACHE_RAM_ATTR handleSystemBtnISR()
  */
 void setup()
 {
-
   // Initialize the System
   initSystem();
 
@@ -250,6 +195,9 @@ void setup()
 
   // Initialize the System LED Module
   initSystemLed();
+
+  // Initialize the 1kHz ISR
+  init1kHzISR();
 
   // Pre-Initialization finsihed, set the system mode to start up
   updateMode(MODE_STARTUP, 0);
@@ -275,7 +223,6 @@ void setup()
   // Check if the Soil Humidity Sensor is calibrated
   if (pEepromMirror->isCalibrated != EEPROM_SENSOR_IS_CALIBRATED)
   {
-
     // Sensor not calibarted, start calibration mode
     pWorkVarSystem->currentSystemMode = MODE_CALIBRATION;
 
@@ -287,7 +234,6 @@ void setup()
   }
   else
   {
-
     // Sensor calibarted, start normal mode
     pWorkVarSystem->currentSystemMode = MODE_NORMAL;
 
@@ -304,7 +250,6 @@ void setup()
  */
 void loop()
 {
-
   bool sendEnviromentMsg = false;
   bool sendWateringMsg = false;
 
@@ -315,11 +260,9 @@ void loop()
   // Check if the system is in normal mode
   if (pWorkVarSystem->currentSystemMode == MODE_NORMAL)
   {
-
     // Check if a new measurment cycle must be performed
     if ((startTime - pWorkVarSystem->lastMeasuredTime) > pWorkVarSystem->measurementTime)
     {
-
       // Measure the Soil Moisture
       measureSMS(pWorkVarSystem->measurementSlot);
 
@@ -338,7 +281,6 @@ void loop()
       // Check if the enviroment message must be sent
       if (pWorkVarSystem->measurementSlot == 0)
       {
-
         // Remeber to send the enviroment message
         sendEnviromentMsg = true;
       }
@@ -351,9 +293,8 @@ void loop()
     }
 
     // Check if the watering button has been pressed
-    if (pWorkVarSystem->wateringBtnCnt != pWorkVarWateringBtn->wateringBtnCnt)
+    if (pWorkVarSystem->wateringBtnCnt != pWorkVar1kHzISR->workVarWateringBtn.btnCnt)
     {
-
       // Remeber to send the watering message
       sendWateringMsg = true;
 
@@ -362,7 +303,7 @@ void loop()
     }
 
     // Check if the System button has been pressed
-    if (pWorkVarSystem->systemBtnCnt != pWorkVarSystemBtn->systemBtnCnt)
+    if (pWorkVarSystem->systemBtnCnt != pWorkVar1kHzISR->workVarSystemBtn.btnCnt)
     {
       // Increment the system button counter i.e the button press has been proccessed
       pWorkVarSystem->systemBtnCnt++;
@@ -379,7 +320,6 @@ void loop()
   }
   else
   {
-
     // Call calibrate sensor service
     calibrateSensorService();
   }
@@ -393,7 +333,6 @@ void loop()
   // Check if the current runtime is greater than the max runtime
   if (runTime > pWorkVarSystem->maxRuntime)
   {
-
     // Update the max runtime
     pWorkVarSystem->maxRuntime = runTime;
   }
@@ -408,48 +347,44 @@ void loop()
  */
 void initSystem()
 {
-
   // Initialize the working varibles pointer
   pWorkVarSystem = &workVarSystem;
-
-  // Initialize the working varibles pointer
-  pWorkVarWateringBtn = &workVarWateringBtn;
-
-  // Initialize the working varibles pointer
-  pWorkVarSystemBtn = &workVarSystemBtn;
 
   // Clear the working varibles
   memset((void *)pWorkVarSystem, 0, sizeof(WorkVarSystem_S));
 
-  // Clear the working varibles
-  memset((void *)pWorkVarWateringBtn, 0, sizeof(WorkVarWateringBtn_S));
-
-  // Clear the working varibles
-  memset((void *)pWorkVarSystemBtn, 0, sizeof(WorkVarSystemBtn_S));
-
   // Initialize the System working varibles
   pWorkVarSystem->measurementTime = (uint32_t)((ENVIROMENT_MSG_FREQUNCY / NUM_OF_SAMPLES_PER_MSG) * 1000);
 
-  // Initialize the watering button idle time
-  pWorkVarWateringBtn->idleTime = BUTTON_SHORT_PRESS_IDLE_TIME;
-
-  // Initialize the system button idle time
-  pWorkVarSystemBtn->idleTime = BUTTON_LONG_PRESS_IDLE_TIME;
-
   // Initialize the UART
   Serial.begin(UART_BAUD_RATE);
+}
 
-  // Initialize the Watering Button pin as input
-  pinMode(BUTTON_WATERING_PIN, INPUT);
+/**
+ * @brief Initializes the 1kHz ISR.
+ */
+void init1kHzISR()
+{
+  // Initialize the working varibles pointer
+  pWorkVar1kHzISR = &workVar1kHzISR;
 
-  // Initialize the System Button pin as input
-  pinMode(BUTTON_SYSTEM_PIN, INPUT);
+  // Clear the working varibles
+  memset((void *)pWorkVar1kHzISR, 0, sizeof(WorkVar1kHzISR_S));
 
-  // Initialize the Watering Button ISR
-  attachInterrupt(digitalPinToInterrupt(BUTTON_WATERING_PIN), handleWateringBtnISR, CHANGE);
+  // Initialize the watering button
+  pWorkVar1kHzISR->workVarWateringBtn.buttonPressedIdleTime = (uint32_t)BUTTON_SHORT_PRESS_IDLE_TIME;
+  pWorkVar1kHzISR->workVarWateringBtn.pin = (uint32_t)BUTTON_WATERING_PIN;
+  pWorkVar1kHzISR->workVarWateringBtn.isPullup = (uint32_t)false;
+  pinMode(pWorkVar1kHzISR->workVarWateringBtn.pin, INPUT);
 
-  // Initialize the System Button ISR
-  attachInterrupt(digitalPinToInterrupt(BUTTON_SYSTEM_PIN), handleSystemBtnISR, CHANGE);
+  // Initialize the system button
+  pWorkVar1kHzISR->workVarSystemBtn.buttonPressedIdleTime = (uint32_t)BUTTON_LONG_PRESS_IDLE_TIME;
+  pWorkVar1kHzISR->workVarSystemBtn.pin = (uint32_t)BUTTON_SYSTEM_PIN;
+  pWorkVar1kHzISR->workVarSystemBtn.isPullup = (uint32_t)true;
+  pinMode(pWorkVar1kHzISR->workVarSystemBtn.pin, INPUT);
+
+  // Initialize the 1kHz interrupt
+  ITimer.attachInterruptInterval(ISR_1KHZ_TIME * 1000, isr1kHz);
 }
 
 /**
@@ -461,7 +396,6 @@ void initSystem()
  */
 void updateMode(uint32_t mode, uint32_t calibStep)
 {
-
   // Update the system mode
   pWorkVarSystem->currentSystemMode = mode;
 
@@ -471,27 +405,27 @@ void updateMode(uint32_t mode, uint32_t calibStep)
   // Switch depending on the system mode
   switch (pWorkVarSystem->currentSystemMode)
   {
-  case MODE_STARTUP:
-    // change the system to startup mode
-    pWorkVarSystemLed->delay = SYSTEM_LED_DELAY_STARTUP;
-    break;
+    case MODE_STARTUP:
+      // change the system to startup mode
+      pWorkVarSystemLed->delay = SYSTEM_LED_DELAY_STARTUP;
+      break;
 
-  default:
-  case MODE_NORMAL:
-    // change the system LED to normal mode
-    pWorkVarSystemLed->delay = SYSTEM_LED_DELAY_NORMAL;
+    default:
+    case MODE_NORMAL:
+      // change the system LED to normal mode
+      pWorkVarSystemLed->delay = SYSTEM_LED_DELAY_NORMAL;
 
-    // Change the system button idle time to long
-    pWorkVarSystemBtn->idleTime = BUTTON_LONG_PRESS_IDLE_TIME;
-    break;
+      // Change the system button idle time to long
+      pWorkVar1kHzISR->workVarSystemBtn.buttonPressedIdleTime = BUTTON_LONG_PRESS_IDLE_TIME;
+      break;
 
-  case MODE_CALIBRATION:
-    // Change the system LED to calibration mode
-    pWorkVarSystemLed->delay = SYSTEM_LED_DELAY_CALIBRATION;
+    case MODE_CALIBRATION:
+      // Change the system LED to calibration mode
+      pWorkVarSystemLed->delay = SYSTEM_LED_DELAY_CALIBRATION;
 
-    // Change the system button idle time to short
-    pWorkVarSystemBtn->idleTime = BUTTON_SHORT_PRESS_IDLE_TIME;
-    break;
+      // Change the system button idle time to short
+      pWorkVar1kHzISR->workVarSystemBtn.buttonPressedIdleTime = BUTTON_SHORT_PRESS_IDLE_TIME;
+      break;
   }
 
   // update the display
@@ -503,53 +437,51 @@ void updateMode(uint32_t mode, uint32_t calibStep)
  */
 void calibrateSensorService()
 {
-
   // Check if the System button has been pressed
-  if (pWorkVarSystem->systemBtnCnt != pWorkVarSystemBtn->systemBtnCnt)
+  if (pWorkVarSystem->systemBtnCnt != pWorkVar1kHzISR->workVarSystemBtn.btnCnt)
   {
-
     // Increment the system button counter i.e the button press has been proccessed
     pWorkVarSystem->systemBtnCnt++;
 
     // Switch depending on current calibration step
     switch (pWorkVarSystem->currentCalibrationStep)
     {
-    default:
-    case CALIBRATION_STEP1:
-      // Measure the Soil Moisture
-      measureSMS(pWorkVarSystem->measurementSlot);
+      default:
+      case CALIBRATION_STEP1:
+        // Measure the Soil Moisture
+        measureSMS(pWorkVarSystem->measurementSlot);
 
-      // Save the maximum calibartion value
-      pEepromMirror->maxValueCalib = getLastRawSMS();
+        // Save the maximum calibartion value
+        pEepromMirror->maxValueCalib = getLastRawSMS();
 
-      // Update the calibartion step
-      pWorkVarSystem->currentCalibrationStep = CALIBRATION_STEP2;
-      break;
+        // Update the calibartion step
+        pWorkVarSystem->currentCalibrationStep = CALIBRATION_STEP2;
+        break;
 
-    case CALIBRATION_STEP2:
-      // Measure the Soil Moisture
-      measureSMS(pWorkVarSystem->measurementSlot);
+      case CALIBRATION_STEP2:
+        // Measure the Soil Moisture
+        measureSMS(pWorkVarSystem->measurementSlot);
 
-      // Save the minium calibartion value
-      pEepromMirror->minValueCalib = getLastRawSMS();
+        // Save the minium calibartion value
+        pEepromMirror->minValueCalib = getLastRawSMS();
 
-      // Update the calibartion step
-      pWorkVarSystem->currentCalibrationStep = CALIBRATION_STEP3;
-      break;
+        // Update the calibartion step
+        pWorkVarSystem->currentCalibrationStep = CALIBRATION_STEP3;
+        break;
 
-    case CALIBRATION_STEP3:
-      // Update the calibartion step
-      pWorkVarSystem->currentCalibrationStep = CALIBRATION_STEP3;
+      case CALIBRATION_STEP3:
+        // Update the calibartion step
+        pWorkVarSystem->currentCalibrationStep = CALIBRATION_STEP3;
 
-      // Set the calibration signature
-      pEepromMirror->isCalibrated = EEPROM_SENSOR_IS_CALIBRATED;
+        // Set the calibration signature
+        pEepromMirror->isCalibrated = EEPROM_SENSOR_IS_CALIBRATED;
 
-      // Update the EEPROM data
-      updateEeprom();
+        // Update the EEPROM data
+        updateEeprom();
 
-      // Restart the system into calibration mode
-      ESP.restart();
-      break;
+        // Restart the system into calibration mode
+        ESP.restart();
+        break;
     }
 
     // Update system mode
@@ -566,7 +498,6 @@ void calibrateSensorService()
  */
 void initSystemLed()
 {
-
   // Initialize the working varibles pointer
   pWorkVarSystemLed = &workVarSystemLed;
 
@@ -583,9 +514,6 @@ void initSystemLed()
 
   // Turn off the System LED as the initla state
   digitalWrite(pWorkVarSystemLed->pin, pWorkVarSystemLed->currentValue);
-
-  // Define the System LED timer interrupt in [us]
-  ITimer.attachInterruptInterval(SYSTEM_LED_TIMER_ISR * 1000, blinkSystemLedISR);
 }
 
 /****************************************************************
@@ -597,7 +525,6 @@ void initSystemLed()
  */
 void initEeprom()
 {
-
   // Initialize the EEPROM mirror pointer
   pEepromMirror = &eepromMirror;
 
@@ -613,7 +540,6 @@ void initEeprom()
  */
 void updateEeprom()
 {
-
   // Write the whole EEPROM mirror into the EEPROM
   EEPROM.put(0, eepromMirror);
 
@@ -628,11 +554,10 @@ void updateEeprom()
 /**
  * @brief Initializes the OLED Display module.
  *
- * @note Must be initialized before System LED module becauuse of interrupt problems.
+ * @note Must be initialized before System LED module because of interrupt problems.
  */
 void initOledDisplay()
 {
-
   // Initialize the line buffer
   memset((void *)&lineBuffer[0], 0, sizeof(char) * DISPLAY_NUM_OF_CHAR);
 
@@ -642,7 +567,7 @@ void initOledDisplay()
   // Clear the write buffer
   u8g2.clearBuffer();
 
-  // Define the front for all text
+  // Define the font for all text
   u8g2.setFont(u8g2_font_profont12_mf);
 }
 
@@ -655,14 +580,12 @@ void initOledDisplay()
  */
 void updateDisplay(uint32_t mode, uint32_t calibStep)
 {
-
   // Clear the write buffer
   u8g2.clearBuffer();
 
-  // check the mode
+  // Check the mode
   if (mode == MODE_STARTUP)
   {
-
     // Draw the startup mode screen
     u8g2.drawStr(0, 10, DISPLAY_STARTUP_MODE_TITLE);
     u8g2.drawStr(0, 20, DISPLAY_STARTUP_LINE1);
@@ -671,49 +594,47 @@ void updateDisplay(uint32_t mode, uint32_t calibStep)
   }
   else if (mode == MODE_NORMAL)
   {
-
     // Draw the normal mode screen
     u8g2.drawStr(0, 10, DISPLAY_NORMAL_MODE_TITLE);
-    sprintf(lineBuffer, "%s.: %2.4f", DISPLAY_NORMAL_LINE1, getLastSMS());
+    sprintf(lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE1, getLastSMS());
     u8g2.drawStr(0, 20, lineBuffer);
-    sprintf(lineBuffer, "%s. : %2.4f", DISPLAY_NORMAL_LINE2, getLastSTS());
+    sprintf(lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE2, getLastSTS());
     u8g2.drawStr(0, 30, lineBuffer);
-    sprintf(lineBuffer, "%s. : %2.4f", DISPLAY_NORMAL_LINE3, getLastHumidATS());
+    sprintf(lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE3, getLastHumidATS());
     u8g2.drawStr(0, 40, lineBuffer);
-    sprintf(lineBuffer, "%s.  : %2.4f", DISPLAY_NORMAL_LINE4, getLastTempATS());
+    sprintf(lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE4, getLastTempATS());
     u8g2.drawStr(0, 50, lineBuffer);
-    sprintf(lineBuffer, "%s      : %2.4f", DISPLAY_NORMAL_LINE5, getLastLS());
+    sprintf(lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE5, getLastLS());
     u8g2.drawStr(0, 60, lineBuffer);
   }
   else
   {
-
-    // Draw the calibration mode screen depeding on the calibration step
+    // Draw the calibration mode screen depending on the calibration step
     u8g2.drawStr(0, 10, DISPLAY_CALIBRATION_MODE_TITLE);
 
     switch (calibStep)
     {
-    case CALIBRATION_STEP1:
-      u8g2.drawStr(0, 20, DISPLAY_CALIBRATION_STEP1_LINE1);
-      u8g2.drawStr(0, 30, DISPLAY_CALIBRATION_STEP1_LINE2);
-      u8g2.drawStr(0, 40, DISPLAY_CALIBRATION_STEP1_LINE3);
-      u8g2.drawStr(0, 50, DISPLAY_CALIBRATION_STEP1_LINE4);
-      break;
+      case CALIBRATION_STEP1:
+        u8g2.drawStr(0, 20, DISPLAY_CALIBRATION_STEP1_LINE1);
+        u8g2.drawStr(0, 30, DISPLAY_CALIBRATION_STEP1_LINE2);
+        u8g2.drawStr(0, 40, DISPLAY_CALIBRATION_STEP1_LINE3);
+        u8g2.drawStr(0, 50, DISPLAY_CALIBRATION_STEP1_LINE4);
+        break;
 
-    case CALIBRATION_STEP2:
-      u8g2.drawStr(0, 20, DISPLAY_CALIBRATION_STEP2_LINE1);
-      u8g2.drawStr(0, 30, DISPLAY_CALIBRATION_STEP2_LINE2);
-      u8g2.drawStr(0, 40, DISPLAY_CALIBRATION_STEP2_LINE3);
-      u8g2.drawStr(0, 50, DISPLAY_CALIBRATION_STEP2_LINE4);
-      break;
+      case CALIBRATION_STEP2:
+        u8g2.drawStr(0, 20, DISPLAY_CALIBRATION_STEP2_LINE1);
+        u8g2.drawStr(0, 30, DISPLAY_CALIBRATION_STEP2_LINE2);
+        u8g2.drawStr(0, 40, DISPLAY_CALIBRATION_STEP2_LINE3);
+        u8g2.drawStr(0, 50, DISPLAY_CALIBRATION_STEP2_LINE4);
+        break;
 
-    default:
-    case CALIBRATION_STEP3:
-      u8g2.drawStr(0, 20, DISPLAY_CALIBRATION_STEP3_LINE1);
-      u8g2.drawStr(0, 30, DISPLAY_CALIBRATION_STEP3_LINE2);
-      u8g2.drawStr(0, 40, DISPLAY_CALIBRATION_STEP3_LINE3);
-      u8g2.drawStr(0, 50, DISPLAY_CALIBRATION_STEP3_LINE4);
-      break;
+      default:
+      case CALIBRATION_STEP3:
+        u8g2.drawStr(0, 20, DISPLAY_CALIBRATION_STEP3_LINE1);
+        u8g2.drawStr(0, 30, DISPLAY_CALIBRATION_STEP3_LINE2);
+        u8g2.drawStr(0, 40, DISPLAY_CALIBRATION_STEP3_LINE3);
+        u8g2.drawStr(0, 50, DISPLAY_CALIBRATION_STEP3_LINE4);
+        break;
     }
   }
 
@@ -730,7 +651,7 @@ void updateDisplay(uint32_t mode, uint32_t calibStep)
  */
 void initWiFi()
 {
-  // Set WiFI mode
+  // Set WiFi mode
   WiFi.mode(WIFI_STA);
 
   // Connect to WiFi
@@ -739,7 +660,7 @@ void initWiFi()
   // Wait until a connection to WiFi is established
   while (WiFi.status() != WL_CONNECTED)
   {
-    // wait for 500ms before checking the WiFi status again
+    // Wait for 500ms before checking the WiFi status again
     delay(500);
   };
 }
@@ -751,15 +672,14 @@ void initWiFi()
 /**
  * @brief Initializes the MQTT module.
  *
- * @note  Must be initialized AFTER a WiFi connection is established.
+ * @note Must be initialized AFTER a WiFi connection is established.
  */
 void initMqtt()
 {
-
-  // Initialize the working varibles pointer
+  // Initialize the working variables pointer
   pWorkVarMqtt = &workVarMqtt;
 
-  // Clear the working varibles
+  // Clear the working variables
   memset((void *)pWorkVarMqtt, 0, sizeof(WorkVarMqtt_S));
 
   // Set the MQTT client connection to insecure
@@ -776,22 +696,20 @@ void initMqtt()
  * @brief Performs the MQTT service, must be called from background continuously.
  *
  * @param bool sendWateringMsg: Indicator if the watering message should be published.
- * @param bool sendEnviromentMsg: Indicator if the enviroment message should be published.
+ * @param bool sendEnviromentMsg: Indicator if the environment message should be published.
  * @param uint64_t millis: Number of milliseconds passed since the system started.
  */
 void mqttService(bool sendWateringMsg, bool sendEnviromentMsg, uint64_t millis)
 {
-
   // Connect/Reconnect to the MQTT server
   mqttConnect();
 
-  // Maintain connection and check for incomming messsages
+  // Maintain connection and check for incoming messages
   client.loop();
 
-  // check if the watering message needs to be published
+  // Check if the watering message needs to be published
   if (sendWateringMsg == true)
   {
-
     // Prepare the JSON message
     doc[MQTT_JSON_KEY_WATERING] = true;
     doc[MQTT_JSON_KEY_TIME] = millis;
@@ -802,14 +720,13 @@ void mqttService(bool sendWateringMsg, bool sendEnviromentMsg, uint64_t millis)
     // Publish the message
     client.publish(MQTT_TOPIC_PUBLISH_WATERING, &pWorkVarMqtt->msgBuffer[0], true);
 
-    // Clear the json memory pool
+    // Clear the JSON memory pool
     doc.clear();
   }
 
-  // check if the enviroment message needs to be published
+  // Check if the environment message needs to be published
   if (sendEnviromentMsg == true)
   {
-
     // Prepare the JSON message
     doc[MQTT_JSON_KEY_VERSION] = MQTT_MSG_ENV_VERSION;
     doc[MQTT_JSON_KEY_TIME] = millis;
@@ -825,32 +742,28 @@ void mqttService(bool sendWateringMsg, bool sendEnviromentMsg, uint64_t millis)
     // Publish the message
     client.publish(MQTT_TOPIC_PUBLISH_ENVIROMENT, &pWorkVarMqtt->msgBuffer[0], true);
 
-    // Clear the json memory pool
+    // Clear the JSON memory pool
     doc.clear();
   }
 }
 
 /**
- * @brief Cconnects/Reconnects to the MQTT server.
+ * @brief Connects/Reconnects to the MQTT server.
  */
 void mqttConnect()
 {
-
   // Loop until the connection to the MQTT server is established
   while (client.connected() == false)
   {
-
     // Try to connect to the MQTT client
     if (client.connect(MQTT_CLIENT, MQTT_USER, MQTT_PASSWORD))
     {
-
       // Subscribe to the feedback topic
       client.subscribe(MQTT_TOPIC_SUBSCRIBED_FEEDBACK);
     }
     else
     {
-
-      // Delay for 500ms before tyring again
+      // Delay for 500ms before trying again
       delay(500);
     }
   }
@@ -879,11 +792,10 @@ void mqttCallback(char *topic, byte *pPayload, uint32_t length)
  */
 void initSTS()
 {
-
-  // Initialize the working varibles pointer
+  // Initialize the working variables pointer
   pWorkVarSTS = &workVarSTS;
 
-  // Clear the working varibles
+  // Clear the working variables
   memset((void *)pWorkVarSTS, 0, sizeof(WorkVarSTS_S));
 
   // Initialize the connection to the Soil Temperature Sensor
@@ -897,8 +809,7 @@ void initSTS()
  */
 void measureSTS(uint32_t slot)
 {
-
-  // Request new sensort values from the Soil Temperature sensor
+  // Request new sensor values from the Soil Temperature sensor
   soilTempSensor.requestTemperatures();
 
   // Get the current Soil Temperature value
@@ -910,28 +821,29 @@ void measureSTS(uint32_t slot)
   // Check if a valid value was received
   if (pWorkVarSTS->lastValue == DEVICE_DISCONNECTED_C)
   {
-
     // Error Message
     Serial.println("Error: Could not read temperature data");
   }
 }
 
 /**
- * @brief Returns the avage Soil Temperature from the last NUM_OF_SAMPLES_PER_MSG.
+ * @brief Returns the average Soil Temperature from the last NUM_OF_SAMPLES_PER_MSG.
  *
- * @param float: Avarage Soil Temperature value.
+ * @param float: Average Soil Temperature value.
  */
 float getAvgSTS()
 {
-
+  // Sum of the average values
   float sum = 0;
 
-  // Calculate and return the Soil Temperature avarge value
+  // Calculate
   for (int i = 0; i < NUM_OF_SAMPLES_PER_MSG; i++)
   {
+    // Add the current value
     sum += pWorkVarSTS->values[i];
   }
 
+  // Return the average Soil Moisture value
   return (sum / (float)NUM_OF_SAMPLES_PER_MSG);
 }
 
@@ -952,19 +864,18 @@ float getLastSTS()
 /**
  * @brief Initializes the Soil Moisture Sensor module.
  *
- * @param uint32_t minValueCalib: Calibrated minium value read from the EEPROM.
+ * @param uint32_t minValueCalib: Calibrated minimum value read from the EEPROM.
  * @param uint32_t maxValueCalib: Calibrated maximum value read from the EEPROM.
  */
 void initSMS(uint32_t minValueCalib, uint32_t maxValueCalib)
 {
-
-  // Initialize the working varibles pointer
+  // Initialize the working variables pointer
   pWorkVarSMS = &workVarSMS;
 
-  // Clear the working varibles
+  // Clear the working variables
   memset((void *)pWorkVarSMS, 0, sizeof(WorkVarSMS_S));
 
-  // Initialize the calibrated minium value
+  // Initialize the calibrated minimum value
   pWorkVarSMS->minValueCalib = minValueCalib;
 
   // Initialize the calibrated maximum value
@@ -981,14 +892,12 @@ void initSMS(uint32_t minValueCalib, uint32_t maxValueCalib)
  */
 void measureSMS(uint32_t slot)
 {
-
   // Measure the current Soil Moisture value
   pWorkVarSMS->lastValueRaw = analogRead(SMS_ANALOG_PIN);
 
   // Check if the raw sensor data can be normalized
   if ((pWorkVarSMS->maxValueCalib - pWorkVarSMS->minValueCalib) != 0)
   {
-
     // Normalize the Soil Moisture value
     pWorkVarSMS->lastValue = float(pWorkVarSMS->maxValueCalib - pWorkVarSMS->lastValueRaw) / float(pWorkVarSMS->maxValueCalib - pWorkVarSMS->minValueCalib);
   }
@@ -998,21 +907,23 @@ void measureSMS(uint32_t slot)
 }
 
 /**
- * @brief Returns the avage Soil Moisture from the last NUM_OF_SAMPLES_PER_MSG.
+ * @brief Returns the average Soil Moisture from the last NUM_OF_SAMPLES_PER_MSG.
  *
- * @param float: Avarage Soil Moisture value.
+ * @param float: Average Soil Moisture value.
  */
 float getAvgSMS()
 {
-
+  // Sum of the average values
   float sum = 0;
 
-  // Calculate and return the Soil Moisture avarge value
+  // Calculate
   for (int i = 0; i < NUM_OF_SAMPLES_PER_MSG; i++)
   {
+    // Add the current value
     sum += pWorkVarSMS->values[i];
   }
 
+  // Return the average Soil Moisture value
   return (sum / (float)NUM_OF_SAMPLES_PER_MSG);
 }
 
@@ -1045,11 +956,10 @@ float getLastRawSMS()
  */
 void initATS()
 {
-
-  // Initialize the working varibles pointer
+  // Initialize the working variables pointer
   pWorkVarATS = &workVarATS;
 
-  // Clear the working varibles
+  // Clear the working variables
   memset((void *)pWorkVarATS, 0, sizeof(WorkVarATS_S));
 
   // Initialize the Air Temperature/Humidity Sensor
@@ -1063,7 +973,6 @@ void initATS()
  */
 void measureATS(uint32_t slot)
 {
-
   // Measure and save the current Air Temperature/Humidity values
   airSensor.read_meas_data_single_shot(HIGH_REP_WITH_STRCH, &pWorkVarATS->lastTempValue, &pWorkVarATS->lastHumidValue);
 
@@ -1075,40 +984,44 @@ void measureATS(uint32_t slot)
 }
 
 /**
- * @brief Returns the avarage Air Temperature from the last NUM_OF_SAMPLES_PER_MSG.
+ * @brief Returns the average Air Temperature from the last NUM_OF_SAMPLES_PER_MSG.
  *
- * @param float: Avarage Air Temperature value.
+ * @param float: Average Air Temperature value.
  */
 float getAvgTempATS()
 {
-
+  // Sum of the average values
   float sum = 0;
 
-  // Calculate and return the Air Temperature avarge value
+  // Calculate
   for (int i = 0; i < NUM_OF_SAMPLES_PER_MSG; i++)
   {
+    // Add the current value
     sum += pWorkVarATS->tempValues[i];
   }
 
+  // Return the average Air Temperature value
   return (sum / (float)NUM_OF_SAMPLES_PER_MSG);
 }
 
 /**
- * @brief Returns the avarage Air Humidity from the last NUM_OF_SAMPLES_PER_MSG.
+ * @brief Returns the average Air Humidity from the last NUM_OF_SAMPLES_PER_MSG.
  *
- * @param float: Avarage Air Humidity value.
+ * @param float: Average Air Humidity value.
  */
 float getAvgHumidATS()
 {
-
+  // Sum of the average values
   float sum = 0;
 
-  // Calculate and return the Air Temperature avarge value
+  // Calculate
   for (int i = 0; i < NUM_OF_SAMPLES_PER_MSG; i++)
   {
+    // Add the current value
     sum += pWorkVarATS->humidValues[i];
   }
 
+  // Return the average Air Humidity value
   return (sum / (float)NUM_OF_SAMPLES_PER_MSG);
 }
 
@@ -1141,11 +1054,10 @@ float getLastHumidATS()
  */
 void initLS()
 {
-
-  // Initialize the working varibles pointer
+  // Initialize the working variables pointer
   pWorkVarLS = &workVarLS;
 
-  // Clear the working varibles
+  // Clear the working variables
   memset((void *)pWorkVarLS, 0, sizeof(WorkVarLS_S));
 
   // Initialize the I2C bus (BH1750 library doesn't do this automatically)
@@ -1162,7 +1074,6 @@ void initLS()
  */
 void measureLS(uint32_t slot)
 {
-
   // Get the current Light value
   pWorkVarLS->lastValue = lightMeter.readLightLevel();
 
@@ -1171,21 +1082,23 @@ void measureLS(uint32_t slot)
 }
 
 /**
- * @brief Returns the avarage Light value from the last NUM_OF_SAMPLES_PER_MSG.
+ * @brief Returns the average Light value from the last NUM_OF_SAMPLES_PER_MSG.
  *
- * @param float: Avarage Light value.
+ * @param float: Average Light value.
  */
 float getAvgLS()
 {
-
+  // Sum of the average values
   float sum = 0;
 
-  // Calculate and return the Light avarge value
+  // Calculate
   for (int i = 0; i < NUM_OF_SAMPLES_PER_MSG; i++)
   {
+    // Add the current value
     sum += pWorkVarLS->values[i];
   }
 
+  // Return the average Light value
   return (sum / (float)NUM_OF_SAMPLES_PER_MSG);
 }
 
