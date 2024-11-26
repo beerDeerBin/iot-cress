@@ -190,14 +190,14 @@ const char* MQTT_TOPIC_PUBLISH_WATERING = "sensor/6/test/urgent";
 #define MQTT_MSG_ENV_VERSION 1                  // current version of the MQTT enviroment message
 
 // JSON KEYS
-const char* MQTT_JSON_KEY_VERSION = "Version";
-const char* MQTT_JSON_KEY_TIME = "Milliseconds";
-const char* MQTT_JSON_KEY_SOIL_MOISTURE = "SoilMoisture";
-const char* MQTT_JSON_KEY_SOIL_TEMPERATURE = "SoilTemperature";
-const char* MQTT_JSON_KEY_AIR_MOISTURE = "AirMoisture";
-const char* MQTT_JSON_KEY_AIR_TEMPERATURE = "AirTemperature";
-const char* MQTT_JSON_KEY_LIGHT_INTENSITY = "LightIntensity";
-const char* MQTT_JSON_KEY_WATERING = "Watering";
+const char* MQTT_JSON_KEY_VERSION = "version";
+const char* MQTT_JSON_KEY_TIME = "milliseconds";
+const char* MQTT_JSON_KEY_SOIL_MOISTURE = "soilMoisture";
+const char* MQTT_JSON_KEY_SOIL_TEMPERATURE = "soilTemperature";
+const char* MQTT_JSON_KEY_AIR_MOISTURE = "airMoisture";
+const char* MQTT_JSON_KEY_AIR_TEMPERATURE = "airTemperature";
+const char* MQTT_JSON_KEY_LIGHT_INTENSITY = "lightIntensity";
+const char* MQTT_JSON_KEY_WATERING = "watering";
 
 // Working varibales for the MQTT module
 typedef struct WorkVarMqtt_S {
