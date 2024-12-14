@@ -101,10 +101,32 @@ typedef struct WorkVar1kHzISR_S {
 typedef struct WorkVarSystemLed_S {
   uint8_t     pin;                              // the pin of the System LED
   uint8_t     currentValue;                     // the current value of the System LED i.e off or on
-  uint8_t     buffer[2];                        // buffer to keep the data 32-Bit alligned
+  bool        isEnabled;                        // indicator if the system LED is currently enabled
+  uint8_t     buffer;                           // buffer to keep the data 32-Bit alligned
   uint32_t    delay;                            // current blink delay [ms]
   uint32_t    callCnt;                          // call counter
 } WorkVarSystemLed_T;
+
+/****************************************************************
+* Module: SOIL LED
+****************************************************************/
+
+#define SOIL_LED_RED_PIN D8                     // pin number of the Soil LED RED
+#define SOIL_LED_BLUE_PIN D5                    // pin number of the Soil LED BLUE
+#define SOIL_LED_GREEN_PIN D6                   // pin number of the Soil LED GREEN
+#define SOIL_LED_STATE_DRY 0                    // Soil LED dry state
+#define SOIL_LED_STATE_WET 1                    // Soil LED wet state
+#define SOIL_LED_STATE_OK 2                     // Soil LED ok state
+#define SOIL_LED_STATE_UNKNOWN 3                // Soil LED unknown
+
+// Working varibales for the System LED module
+typedef struct WorkVarSoilLed_S {
+  uint8_t     pinRed;                           // the pin of the Soil LED RED
+  uint8_t     pinBlue;                          // the pin of the Soil LED BLUE
+  uint8_t     pinGreen;                         // the pin of the Soil LED GREEN
+  bool        isEnabled;                        // indicator if the Soil LED is currently enabled
+  uint32_t    soilState;                        // current state of the Soil LED
+} WorkVarSoilLed_T;
 
 /****************************************************************
 * Module: EEPROM
@@ -155,13 +177,20 @@ const char* DISPLAY_CALIBRATION_STEP3_LINE2 = "Put sensor back,";
 const char* DISPLAY_CALIBRATION_STEP3_LINE3 = "Press button to";
 const char* DISPLAY_CALIBRATION_STEP3_LINE4 = "continue";
 
+typedef struct WorkVarOled_S {
+  bool        isEnabled;                        // indicator if the OLED-Display is currently enabled
+  uint8_t     buffer[3];                        // buffer to keep the data 32-Bit alligned
+  char        lineBuffer[DISPLAY_NUM_OF_CHAR];  // buffer for one line on the OLED-Display
+  uint8_t     buffer2[3];                       // buffer to keep the data 32-Bit alligned
+} WorkVarOled_T;
+
 /****************************************************************
 * Module: WiFi
 ****************************************************************/
 
 // WiFi Credentials
-const char* WIFI_SSID = TODO
-const char* WIFI_PSK = TODO
+const char* WIFI_SSID = TODO;
+const char* WIFI_PSK = TODO;
 
 /****************************************************************
 * Module: MQTT
@@ -182,14 +211,15 @@ const char* MQTT_PASSWORD = "sensor6";
 const int MQTT_PORT = 8883;
 
 // MQTT topics
-const char* MQTT_TOPIC_SUBSCRIBED_FEEDBACK = "sensor/6/test/feedback";
-const char* MQTT_TOPIC_PUBLISH_ENVIROMENT = "sensor/6/test/environment";
-const char* MQTT_TOPIC_PUBLISH_WATERING = "sensor/6/test/urgent";
+const char* MQTT_TOPIC_SUBSCRIBED_FEEDBACK_SLEEP = "sensor/6/feedback/sleepMode";
+const char* MQTT_TOPIC_SUBSCRIBED_FEEDBACK_SOIL = "sensor/6/feedback/soilState";
+const char* MQTT_TOPIC_PUBLISH_ENVIROMENT = "sensor/6/environment";
+const char* MQTT_TOPIC_PUBLISH_WATERING = "sensor/6/urgent";
 
 #define MQTT_MSG_BUFFER_SIZE 512                // size of the MQTT message buffer in byte
 #define MQTT_MSG_ENV_VERSION 1                  // current version of the MQTT enviroment message
 
-// JSON KEYS
+// JSON KEYS PUBLISHING
 const char* MQTT_JSON_KEY_VERSION = "version";
 const char* MQTT_JSON_KEY_TIME = "milliseconds";
 const char* MQTT_JSON_KEY_SOIL_MOISTURE = "soilMoisture";
@@ -198,6 +228,17 @@ const char* MQTT_JSON_KEY_AIR_MOISTURE = "airMoisture";
 const char* MQTT_JSON_KEY_AIR_TEMPERATURE = "airTemperature";
 const char* MQTT_JSON_KEY_LIGHT_INTENSITY = "lightIntensity";
 const char* MQTT_JSON_KEY_WATERING = "watering";
+
+// JSON KEYS SUBSCRIPTIONS
+const char* MQTT_JSON_KEY_SLEEP_MODE = "sleepMode";
+const char* MQTT_JSON_KEY_SOIL_STATE = "soilState";
+
+// JSON VALUES SUBSCRIPTIONS
+const char* MQTT_JSON_VALUE_SLEEP_MODE_OFF = "off";
+const char* MQTT_JSON_VALUE_SLEEP_MODE_ON = "on";
+const char* MQTT_JSON_VALUE_SOIL_STATE_DRY = "dry";
+const char* MQTT_JSON_VALUE_SOIL_STATE_WET = "wet";
+const char* MQTT_JSON_VALUE_SOIL_STATE_OK = "ok";
 
 // Working varibales for the MQTT module
 typedef struct WorkVarMqtt_S {
