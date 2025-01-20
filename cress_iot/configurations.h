@@ -154,7 +154,6 @@ const char* DISPLAY_STARTUP_LINE1 = "The system is ";
 const char* DISPLAY_STARTUP_LINE2 = "initializing please";
 const char* DISPLAY_STARTUP_LINE3 = "wait";
 
-const char* DISPLAY_NORMAL_MODE_TITLE = "    NORMAL MODE";
 const char* DISPLAY_NORMAL_LINE1 = "Soil moist";
 const char* DISPLAY_NORMAL_LINE2 = "Soil temp";
 const char* DISPLAY_NORMAL_LINE3 = "Air moist";

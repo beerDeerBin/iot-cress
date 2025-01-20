@@ -340,7 +340,7 @@ void loop()
   }
 
   // Update the display
-  updateDisplay(pWorkVarSystem->currentSystemMode, pWorkVarSystem->currentCalibrationStep);
+  updateDisplay(pWorkVarSystem->currentSystemMode, pWorkVarSystem->currentCalibrationStep, pWorkVarSystem->wateringBtnCnt, startTime);
 
   // Update the Soil LED
   updateSoilLed();
@@ -413,7 +413,7 @@ void init1kHzISR()
  *
  * @param uint32_t mode: The mode to set.
  * @param uint32_t calibStep: The current calibration step, if the
-                             system is in calibration mode.
+                              system is in calibration mode.
  */
 void updateMode(uint32_t mode, uint32_t calibStep)
 {
@@ -450,7 +450,7 @@ void updateMode(uint32_t mode, uint32_t calibStep)
   }
 
   // update the display
-  updateDisplay(pWorkVarSystem->currentSystemMode, pWorkVarSystem->currentCalibrationStep);
+  updateDisplay(pWorkVarSystem->currentSystemMode, pWorkVarSystem->currentCalibrationStep, 0, 0);
 }
 
 /**
@@ -684,8 +684,10 @@ void initOledDisplay()
  * @param uint32_t mode: The current mode of the system.
  * @param uint32_t calibStep: The current calibration step, if the
                               system is in calibration mode.
+ * @param uint32_t wateringBtnCnt: The current counter of the watering button.
+ * @param uint64_t millis: Number of milliseconds passed since the system started.
  */
-void updateDisplay(uint32_t mode, uint32_t calibStep)
+void updateDisplay(uint32_t mode, uint32_t calibStep, uint32_t wateringBtnCnt, uint64_t millis)
 {
   // check if the OLED-Display is enabled
   if ((uint32_t)true == (uint32_t)pWorkVarOled->isEnabled || mode != (uint32_t)MODE_NORMAL)
@@ -705,16 +707,17 @@ void updateDisplay(uint32_t mode, uint32_t calibStep)
     else if (mode == (uint32_t)MODE_NORMAL)
     {
       // Draw the normal mode screen
-      u8g2.drawStr(0, 10, DISPLAY_NORMAL_MODE_TITLE);
-      sprintf(pWorkVarOled->lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE1, getLastSMS());
+      sprintf(pWorkVarOled->lineBuffer, "W: %d RT: %d Min", wateringBtnCnt, (uint32_t)(millis / 60000.0));
+      u8g2.drawStr(0, 10, pWorkVarOled->lineBuffer);
+      sprintf(pWorkVarOled->lineBuffer, "%s: %2.2f RH", DISPLAY_NORMAL_LINE1, getLastSMS());
       u8g2.drawStr(0, 20, pWorkVarOled->lineBuffer);
-      sprintf(pWorkVarOled->lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE2, getLastSTS());
+      sprintf(pWorkVarOled->lineBuffer, "%s: %2.2f C", DISPLAY_NORMAL_LINE2, getLastSTS());
       u8g2.drawStr(0, 30, pWorkVarOled->lineBuffer);
-      sprintf(pWorkVarOled->lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE3, getLastHumidATS());
+      sprintf(pWorkVarOled->lineBuffer, "%s: %2.2f H", DISPLAY_NORMAL_LINE3, getLastHumidATS());
       u8g2.drawStr(0, 40, pWorkVarOled->lineBuffer);
-      sprintf(pWorkVarOled->lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE4, getLastTempATS());
+      sprintf(pWorkVarOled->lineBuffer, "%s: %2.2f C", DISPLAY_NORMAL_LINE4, getLastTempATS());
       u8g2.drawStr(0, 50, pWorkVarOled->lineBuffer);
-      sprintf(pWorkVarOled->lineBuffer, "%s: %2.4f", DISPLAY_NORMAL_LINE5, getLastLS());
+      sprintf(pWorkVarOled->lineBuffer, "%s: %2.2f LX", DISPLAY_NORMAL_LINE5, getLastLS());
       u8g2.drawStr(0, 60, pWorkVarOled->lineBuffer);
     }
     else
@@ -911,27 +914,13 @@ void mqttCallback(char *pTopic, byte *pPayload, uint32_t length)
     // check if the value exists
     if (value) 
     {
-      // check if the sleep mode should be enabled
-      if ((uint32_t)0 == strcmp(value, MQTT_JSON_VALUE_SLEEP_MODE_ON)) 
-      {
-        // Enable sleep mode
-        pWorkVarOled->isEnabled = (bool)false;
-        pWorkVarSystemLed->isEnabled = (bool)false;
-        pWorkVarSoilLed->isEnabled = (bool)false;
-      }
-      else
-      {
-        // Disable sleep mode
-        pWorkVarOled->isEnabled = (bool)true;
-        pWorkVarSystemLed->isEnabled = (bool)true;
-        pWorkVarSoilLed->isEnabled = (bool)true;
-      }
+      // Update the sleep mode
+      setSleepMode((uint32_t)0 == strcmp(value, MQTT_JSON_VALUE_SLEEP_MODE_ON));
     }
   }
   // check if the soilState feedback was received
   else if ((uint32_t)0 == strcmp(pTopic, MQTT_TOPIC_SUBSCRIBED_FEEDBACK_SOIL))
   {
-    
     // get the value from the soil state key
     value = doc[MQTT_JSON_KEY_SOIL_STATE];
 
@@ -960,6 +949,30 @@ void mqttCallback(char *pTopic, byte *pPayload, uint32_t length)
 
   // Clear the JSON memory pool
   doc.clear();
+}
+
+/**
+ * @brief Set the sleep mode state of the system.
+ *
+ * @param bool turnOn: Indicator if the sleep mode shoul be enabled.
+ */
+void setSleepMode(bool turnOn)
+{
+  // Check if the sleep shoul be enabled
+  if (turnOn == true)
+  {
+    // Enable sleep mode
+    pWorkVarOled->isEnabled = (bool)false;
+    pWorkVarSystemLed->isEnabled = (bool)false;
+    pWorkVarSoilLed->isEnabled = (bool)false;
+  }
+  else
+  {
+    // Disable sleep mode
+    pWorkVarOled->isEnabled = (bool)true;
+    pWorkVarSystemLed->isEnabled = (bool)true;
+    pWorkVarSoilLed->isEnabled = (bool)true;
+  }
 }
 
 /****************************************************************
@@ -1103,7 +1116,7 @@ float getAvgSMS()
   }
 
   // Return the average Soil Moisture value
-  return (sum / (float)NUM_OF_SAMPLES_PER_MSG);
+  return (sum / (float)NUM_OF_SAMPLES_PER_MSG) * 100.0;
 }
 
 /**
@@ -1113,7 +1126,7 @@ float getAvgSMS()
  */
 float getLastSMS()
 {
-  return pWorkVarSMS->lastValue;
+  return pWorkVarSMS->lastValue * 100.0;
 }
 
 /**
