@@ -709,7 +709,7 @@ void updateDisplay(uint32_t mode, uint32_t calibStep, uint32_t wateringBtnCnt, u
       // Draw the normal mode screen
       sprintf(pWorkVarOled->lineBuffer, "W: %d RT: %d Min", wateringBtnCnt, (uint32_t)(millis / 60000.0));
       u8g2.drawStr(0, 10, pWorkVarOled->lineBuffer);
-      sprintf(pWorkVarOled->lineBuffer, "%s: %2.2f RH", DISPLAY_NORMAL_LINE1, getLastSMS());
+      sprintf(pWorkVarOled->lineBuffer, "%s: %2.2f RH", DISPLAY_NORMAL_LINE1, getLastSMS() * 100.0);
       u8g2.drawStr(0, 20, pWorkVarOled->lineBuffer);
       sprintf(pWorkVarOled->lineBuffer, "%s: %2.2f C", DISPLAY_NORMAL_LINE2, getLastSTS());
       u8g2.drawStr(0, 30, pWorkVarOled->lineBuffer);
@@ -1116,7 +1116,7 @@ float getAvgSMS()
   }
 
   // Return the average Soil Moisture value
-  return (sum / (float)NUM_OF_SAMPLES_PER_MSG) * 100.0;
+  return (sum / (float)NUM_OF_SAMPLES_PER_MSG);
 }
 
 /**
@@ -1126,7 +1126,7 @@ float getAvgSMS()
  */
 float getLastSMS()
 {
-  return pWorkVarSMS->lastValue * 100.0;
+  return pWorkVarSMS->lastValue;
 }
 
 /**
